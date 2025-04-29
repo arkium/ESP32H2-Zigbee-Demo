@@ -26,3 +26,6 @@
     {                                                      \
         .host_connection_mode = ZB_HOST_CONNECTION_MODE_NONE, \
     }
+
+#define ESP_TEMP_SENSOR_MIN_VALUE       (-10)   /* Local sensor min measured value (degree Celsius) */
+#define ESP_TEMP_SENSOR_MAX_VALUE       (80)    /* Local sensor max measured value (degree Celsius) */
