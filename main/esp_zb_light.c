@@ -131,12 +131,19 @@ void button_task(void *pvParameters)
 
             /* Update value */
             esp_zb_lock_acquire(portMAX_DELAY);
-            esp_zb_zcl_set_attribute_val(HA_ESP_LIGHT_ENDPOINT,
-                ESP_ZB_ZCL_CLUSTER_ID_BINARY_INPUT, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-                ESP_ZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, &last_state, false);
+            esp_err_t ret = esp_zb_zcl_set_attribute_val(HA_ESP_LIGHT_ENDPOINT,
+                                                         ESP_ZB_ZCL_CLUSTER_ID_BINARY_INPUT,
+                                                         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                                                         ESP_ZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID,
+                                                         &last_state,
+                                                         false);
             esp_zb_lock_release();
+            if (ret != ESP_OK)
+            {
+                ESP_LOGI(TAG, "Failed to set contact switch to closed: 0x%x: %s", ret, esp_err_to_name(ret));
+            }
 
-            //reportAttribute(HA_ESP_LIGHT_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_BINARY_INPUT, ESP_ZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, &button_state, 1);
+            // reportAttribute(HA_ESP_LIGHT_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_BINARY_INPUT, ESP_ZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, &button_state, 1);
         }
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
@@ -148,22 +155,57 @@ void sensor_readTask(void *pvParameters)
     {
         sensor_read();
         uint16_t temperature = s_temperature * 100;
-        //reportAttribute(HA_ESP_LIGHT_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temperature, 2);
+        // reportAttribute(HA_ESP_LIGHT_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temperature, 2);
 
         esp_zb_lock_acquire(portMAX_DELAY);
-        esp_zb_zcl_status_t ds18b20_state = esp_zb_zcl_set_attribute_val(HA_ESP_LIGHT_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temperature, false);
-        if (ds18b20_state != ESP_ZB_ZCL_STATUS_SUCCESS)
-        {
-            ESP_LOGE(TAG, "Setting DS18B20 attribute failed!");
-        }
-        else
-        {
-            reportAttribute(HA_ESP_LIGHT_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temperature, 2);
-        }
+        esp_err_t ret = esp_zb_zcl_set_attribute_val(HA_ESP_LIGHT_ENDPOINT,
+                                                     ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT,
+                                                     ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+                                                     ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID,
+                                                     &temperature,
+                                                     false);
+        // if (ds18b20_state != ESP_ZB_ZCL_STATUS_SUCCESS)
+        // {
+        //     ESP_LOGE(TAG, "Setting DS18B20 attribute failed!");
+        // }
+        // else
+        // {
+        //     reportAttribute(HA_ESP_LIGHT_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT, ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID, &temperature, 2);
+        // }
         esp_zb_lock_release();
-
+        if (ret != ESP_OK)
+        {
+            ESP_LOGI(TAG, "Failed to set Temp: 0x%x: %s", ret, esp_err_to_name(ret));
+        }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
+}
+
+bool setReporting(uint16_t min_interval, uint16_t max_interval, float delta)
+{
+    esp_zb_zcl_reporting_info_t reporting_info;
+    memset(&reporting_info, 0, sizeof(esp_zb_zcl_reporting_info_t));
+    reporting_info.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_SRV;
+    reporting_info.ep = HA_ESP_LIGHT_ENDPOINT;
+    reporting_info.cluster_id = ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT;
+    reporting_info.cluster_role = ESP_ZB_ZCL_CLUSTER_SERVER_ROLE;
+    reporting_info.attr_id = ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID;
+    reporting_info.u.send_info.min_interval = min_interval;
+    reporting_info.u.send_info.max_interval = max_interval;
+    reporting_info.u.send_info.def_min_interval = min_interval;
+    reporting_info.u.send_info.def_max_interval = max_interval;
+    reporting_info.u.send_info.delta.u16 = (uint16_t)(delta * 100); // Convert delta to ZCL uint16_t
+    reporting_info.dst.profile_id = ESP_ZB_AF_HA_PROFILE_ID;
+    reporting_info.manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC;
+    esp_zb_lock_acquire(portMAX_DELAY);
+    esp_err_t ret = esp_zb_zcl_update_reporting_info(&reporting_info);
+    esp_zb_lock_release();
+    if (ret != ESP_OK)
+    {
+        log_e("Failed to set reporting: 0x%x: %s", ret, esp_err_to_name(ret));
+        return false;
+    }
+    return true;
 }
 
 // void dht22_task(void *pvParameters)
@@ -188,7 +230,9 @@ void sensor_readTask(void *pvParameters)
 
 static void bdb_start_top_level_commissioning_cb(uint8_t mode_mask)
 {
-    ESP_ERROR_CHECK(esp_zb_bdb_start_top_level_commissioning(mode_mask));
+    // ESP_ERROR_CHECK(esp_zb_bdb_start_top_level_commissioning(mode_mask));
+    ESP_RETURN_ON_FALSE(esp_zb_bdb_start_top_level_commissioning(mode_mask) == ESP_OK, ,
+                        TAG, "Failed to start Zigbee bdb commissioning");
 }
 
 static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t *message)
@@ -202,22 +246,23 @@ static esp_err_t zb_attribute_handler(const esp_zb_zcl_set_attr_value_message_t 
              message->attribute.id, message->attribute.data.size);
     if (message->info.dst_endpoint == HA_ESP_LIGHT_ENDPOINT)
     {
-        switch (message->info.cluster) {
-            case ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY:
-                ESP_LOGI(TAG, "Identify pressed");
+        switch (message->info.cluster)
+        {
+        case ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY:
+            ESP_LOGI(TAG, "Identify pressed");
             break;
-            case ESP_ZB_ZCL_CLUSTER_ID_ON_OFF:
-                if (message->attribute.id == ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID && message->attribute.data.type == ESP_ZB_ZCL_ATTR_TYPE_BOOL)
-                {
-                    light_state = message->attribute.data.value ? *(bool *)message->attribute.data.value : light_state;
-                    gpio_set_level(GPIO_NUM_0, light_state);
-                    ESP_LOGI(TAG, "Light sets to %s", light_state ? "On" : "Off");
-                }
+        case ESP_ZB_ZCL_CLUSTER_ID_ON_OFF:
+            if (message->attribute.id == ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID && message->attribute.data.type == ESP_ZB_ZCL_ATTR_TYPE_BOOL)
+            {
+                light_state = message->attribute.data.value ? *(bool *)message->attribute.data.value : light_state;
+                gpio_set_level(GPIO_NUM_0, light_state);
+                ESP_LOGI(TAG, "Light sets to %s", light_state ? "On" : "Off");
+            }
 
             break;
-            default:
-              ESP_LOGI(TAG, "Message data: cluster(0x%x), attribute(0x%x)  ", message->info.cluster, message->attribute.id);
-          }
+        default:
+            ESP_LOGI(TAG, "Message data: cluster(0x%x), attribute(0x%x)  ", message->info.cluster, message->attribute.id);
+        }
 
         // if (message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ON_OFF)
         // {
@@ -241,63 +286,94 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
         ret = zb_attribute_handler((esp_zb_zcl_set_attr_value_message_t *)message);
         break;
     default:
-        ESP_LOGW(TAG, "Receive Zigbee action(0x%x) callback", callback_id);
+        ESP_LOGW(TAG, "Receive unhandled Zigbee action(0x%x) callback", callback_id);
         break;
     }
     return ret;
 }
 
+void factoryReset(bool restart)
+{
+    if (restart)
+    {
+        ESP_LOGI(TAG, "Factory resetting Zigbee stack, device will reboot");
+        esp_zb_factory_reset();
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Factory resetting Zigbee NVRAM to factory default");
+        ESP_LOGI(TAG, "The device will not reboot, to take effect please reboot the device manually");
+        esp_zb_zcl_reset_nvram_to_factory_default();
+    }
+}
+
 void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
 {
+    // common variables
     uint32_t *p_sg_p = signal_struct->p_app_signal;
     esp_err_t err_status = signal_struct->esp_err_status;
-    esp_zb_app_signal_type_t sig_type = *p_sg_p;
+    esp_zb_app_signal_type_t sig_type = (esp_zb_app_signal_type_t)*p_sg_p;
+
+    // main switch
     switch (sig_type)
     {
     case ESP_ZB_ZDO_SIGNAL_SKIP_STARTUP:
         ESP_LOGI(TAG, "Zigbee stack initialized");
+        ESP_LOGD(TAG, "Zigbee channel mask: 0x%08x", (char)esp_zb_get_channel_mask());
         esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_INITIALIZATION);
         break;
     case ESP_ZB_BDB_SIGNAL_DEVICE_FIRST_START:
     case ESP_ZB_BDB_SIGNAL_DEVICE_REBOOT:
         if (err_status == ESP_OK)
         {
-            ESP_LOGI(TAG, "Start network steering");
-            esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
+            // xTaskCreate(button_task, "button_task", 4096, NULL, 5, NULL);
+            xTaskCreate(sensor_readTask, "sensor_readTask", 4096, NULL, 5, NULL);
+            setReporting(1,0,1);
+            // xTaskCreate(dht22_task, "dht22_task", 4096, NULL, 5, NULL);
+
+            ESP_LOGI(TAG, "Device started up in%s factory-reset mode", esp_zb_bdb_is_factory_new() ? "" : " non");
+            if (esp_zb_bdb_is_factory_new())
+            {
+
+                ESP_LOGI(TAG, "Start network steering");
+                esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
+                // Zigbee._started = true;
+                // xSemaphoreGive(Zigbee.lock);
+            }
+            else
+            {
+                ESP_LOGI(TAG, "Device rebooted");
+                // Zigbee._started = true;
+                // xSemaphoreGive(Zigbee.lock);
+                // Save the channel mask to NVRAM in case of reboot which may be on a different channel after a change in the network
+                // Zigbee.setNVRAMChannelMask(1 << esp_zb_get_current_channel());
+                // Zigbee._connected = true;
+                // Zigbee.searchBindings();
+            }
         }
         else
         {
             /* commissioning failed */
-            ESP_LOGW(TAG, "Failed to initialize Zigbee stack (status: %s)", esp_err_to_name(err_status));
+            // ESP_LOGW(TAG, "Failed to initialize Zigbee stack (status: %s)", esp_err_to_name(err_status));
+
+            ESP_LOGW(TAG, "%s failed with status: %s, retrying", esp_zb_zdo_signal_to_string(sig_type),
+                     esp_err_to_name(err_status));
+            esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb,
+                                   ESP_ZB_BDB_MODE_INITIALIZATION, 500);
         }
         break;
-
-        // if (err_status == ESP_OK) {
-        //     //ESP_LOGI(TAG, "Deferred driver initialization %s", deferred_driver_init() ? "failed" : "successful");
-        //     ESP_LOGI(TAG, "Device started up in%s factory-reset mode", esp_zb_bdb_is_factory_new() ? "" : " non");
-        //     if (esp_zb_bdb_is_factory_new()) {
-        //         ESP_LOGI(TAG, "Start network steering");
-        //         esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
-        //     } else {
-        //         ESP_LOGI(TAG, "Device rebooted");
-        //     }
-        // } else {
-        //     /* commissioning failed */
-        //     ESP_LOGW(TAG, "Failed to initialize Zigbee stack (status: %s)", esp_err_to_name(err_status));
-        // }
-        // break;
     case ESP_ZB_BDB_SIGNAL_STEERING:
         if (err_status == ESP_OK)
         {
             esp_zb_ieee_addr_t extended_pan_id;
             esp_zb_get_extended_pan_id(extended_pan_id);
-            ESP_LOGI(TAG, "Joined network successfully (Extended PAN ID: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x, PAN ID: 0x%04hx, Channel:%d)",
+            ESP_LOGI(TAG, "Joined network successfully (Extended PAN ID: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x, PAN ID: 0x%04hx, Channel:%d, Short Address: 0x%04hx)",
                      extended_pan_id[7], extended_pan_id[6], extended_pan_id[5], extended_pan_id[4],
                      extended_pan_id[3], extended_pan_id[2], extended_pan_id[1], extended_pan_id[0],
-                     esp_zb_get_pan_id(), esp_zb_get_current_channel());
-            xTaskCreate(button_task, "button_task", 4096, NULL, 5, NULL);
-            //xTaskCreate(sensor_readTask, "sensor_readTask", 4096, NULL, 5, NULL);
-            // xTaskCreate(dht22_task, "dht22_task", 4096, NULL, 5, NULL);
+                     esp_zb_get_pan_id(), esp_zb_get_current_channel(), esp_zb_get_short_address());
+            // Zigbee._connected = true;
+            // Set channel mask and write to NVRAM, so that the device will re-join the network faster after reboot (scan only on the current channel)
+            // Zigbee.setNVRAMChannelMask(1 << esp_zb_get_current_channel());
         }
         else
         {
@@ -305,9 +381,17 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
             esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb, ESP_ZB_BDB_MODE_NETWORK_STEERING, 1000);
         }
         break;
+    case ESP_ZB_ZDO_SIGNAL_LEAVE:
+        // Device was removed from the network, factory reset the device
+        esp_zb_zdo_signal_leave_params_t *leave_params = (esp_zb_zdo_signal_leave_params_t *)esp_zb_app_signal_get_params(p_sg_p);
+        ESP_LOGI(TAG, "Device left the network (reason: %u)", leave_params->leave_type);
+        // led_set_state(LED_STATE_OFF); // <--- LED APAGADO si deja la red
+
+        factoryReset(true);
+        break;
     default:
-        ESP_LOGI(TAG, "ZDO signal: %s (0x%x), status: %s", esp_zb_zdo_signal_to_string(sig_type), sig_type,
-                 esp_err_to_name(err_status));
+        ESP_LOGI(TAG, "ZDO signal: %s (0x%x), status: %s (0x%x)", esp_zb_zdo_signal_to_string(sig_type), sig_type,
+                 esp_err_to_name(err_status), err_status);
         break;
     }
 }
@@ -327,8 +411,8 @@ static void esp_zb_task(void *pvParameters)
     uint32_t ApplicationVersion = 0x0001;
     uint32_t StackVersion = 0x0002;
     uint32_t HWVersion = 0x0002;
-    DEFINE_PSTRING(ManufacturerName, "GammaTroniques");
-    DEFINE_PSTRING(ModelIdentifier, "ESP32-H2 Demo");
+    DEFINE_PSTRING(ManufacturerName, "Arkium SCS");
+    DEFINE_PSTRING(ModelIdentifier, "Koi Pond");
     DEFINE_PSTRING(DateCode, "20230826");
 
     esp_zb_attribute_list_t *esp_zb_basic_cluster = esp_zb_basic_cluster_create(&basic_cluster_cfg);
@@ -367,7 +451,7 @@ static void esp_zb_task(void *pvParameters)
         .max_value = 100,
     };
     esp_zb_attribute_list_t *esp_zb_temperature_meas_cluster = esp_zb_temperature_meas_cluster_create(&temperature_meas_cfg);
-    
+
     // // ------------------------------ Cluster Humidity ------------------------------
     // esp_zb_humidity_meas_cluster_cfg_t humidity_meas_cfg = {
     //     .measured_value = 0xFFFF,
@@ -384,7 +468,7 @@ static void esp_zb_task(void *pvParameters)
 
     esp_zb_cluster_list_add_binary_input_cluster(esp_zb_cluster_list, esp_zb_binary_input_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
     esp_zb_cluster_list_add_temperature_meas_cluster(esp_zb_cluster_list, esp_zb_temperature_meas_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
-//    esp_zb_cluster_list_add_humidity_meas_cluster(esp_zb_cluster_list, esp_zb_humidity_meas_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    //    esp_zb_cluster_list_add_humidity_meas_cluster(esp_zb_cluster_list, esp_zb_humidity_meas_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
 
     // ------------------------------ Create endpoint list ------------------------------
     esp_zb_ep_list_t *esp_zb_ep_list = esp_zb_ep_list_create();
@@ -398,6 +482,8 @@ static void esp_zb_task(void *pvParameters)
 
     // ------------------------------ Register Device ------------------------------
     esp_zb_device_register(esp_zb_ep_list);
+
+    // Register Zigbee action handler
     esp_zb_core_action_handler_register(zb_action_handler);
 
     // /* Config the reporting info  */
@@ -418,6 +504,8 @@ static void esp_zb_task(void *pvParameters)
     // esp_zb_zcl_update_reporting_info(&reporting_info);
 
     esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
+
+    /* initialize Zigbee stack */
     ESP_ERROR_CHECK(esp_zb_start(false));
 
     esp_zb_stack_main_loop();
@@ -433,8 +521,18 @@ void app_main(void)
         .radio_config = ESP_ZB_DEFAULT_RADIO_CONFIG(),
         .host_config = ESP_ZB_DEFAULT_HOST_CONFIG(),
     };
+
     /* Initialize the default NVS partition */
-    ESP_ERROR_CHECK(nvs_flash_init());
+    // ESP_ERROR_CHECK(nvs_flash_init());
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_LOGW(TAG, "NVS problem, deleting and retrying...");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
     /* Set the espressif soc platform config */
     ESP_ERROR_CHECK(esp_zb_platform_config(&config));
 

@@ -11,5 +11,7 @@
     "am2302_rmt.h": "c"
   },
   "idf.flashType": "UART",
-  "idf.pythonInstallPath": "C:\\Users\\pagio\\.espressif\\tools\\idf-python\\3.11.2\\python.exe"
+  "idf.pythonInstallPath": "C:\\Users\\pagio\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+  "idf.espIdfPathWin": "C:\\Users\\pagio\\esp\\v5.4.1\\esp-idf",
+  "idf.toolsPathWin": "C:\\Users\\pagio\\.espressif"
 }
